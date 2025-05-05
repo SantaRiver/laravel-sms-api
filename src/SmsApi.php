@@ -9,6 +9,7 @@ use GuzzleHttp\Psr7\Message;
 use Illuminate\Support\Facades\Log;
 use GuzzleHttp\Exception\RequestException;
 use Gr8Shivam\SmsApi\Exception\InvalidMethodException;
+use Illuminate\Support\Facades\Http;
 
 class SmsApi
 {
@@ -16,8 +17,9 @@ class SmsApi
     private $config = array();
     private $gateway;
     private $request = '';
-    private $response = '';
-    private $responseCode = '';
+    public $response = '';
+    public $res = '';
+    public $responseCode = '';
     private $country_code = null;
     private $wrapperParams=[];
 
@@ -89,15 +91,17 @@ class SmsApi
      * @return $this
      * @throws InvalidMethodException
      */
-    public function sendMessage($to, $message, $extra_params = null, $extra_headers = [])
+    public function sendMessage($to, $message, $extra_params = null, $extra_headers = [],$url =null)
     {
+        
+        //echo 'sendmessage';
         if ($this->gateway == '') {
             $this->loadDefaultGateway();
         }
         $this->loadCredentialsFromConfig();
 
         $request_method = isset($this->config['method']) ? $this->config['method'] : 'GET';
-        $url = $this->config['url'];
+        $url = $url?$url:  $this->config['url'];
 
         $mobile = $this->config['add_code'] ? $this->addCountryCode($to) : $to;
         if (!(isset($this->config['json']) && $this->config['json'])) {
@@ -147,53 +151,106 @@ class SmsApi
         }
 
         try {
-            //Build Request
-            $request = new Request($request_method, $url);
-            if ($request_method == "GET") {
-                $promise = $this->getClient()->sendAsync(
-                    $request,
-                    [
-                        'query' => $params,
-                        'headers' => $headers
-                    ]
-                );
-            } elseif ($request_method == "POST") {
-                $payload = $wrapper ? array_merge(array($wrapper => array($send_vars)), $params) : $params;
+            
+            @$response = Http::get($url);
+           $body = $response->body();
+           //dd($body);
+           if(is_numeric($body))
+              $this->response =  $body;
+           elseif($response->json('Code')){
+                $this->response = $response->json('Code');
+           }else{
+                $this->response = $response->getStatusCode();
+           }
+//            //Build Request
+//            $request = new Request($request_method, $url);
+//            //echo $url;
+//            if ($request_method == "GET") {
+//                
+//                $promise = $this->getClient()->sendAsync(
+//                    $request,
+//                    [
+//                        'query' => $params,
+//                        'headers' => $headers
+//                    ]
+//                );
+//                dd($params);
+//            } elseif ($request_method == "POST") {
+//                $payload = $wrapper ? array_merge(array($wrapper => array($send_vars)), $params) : $params;
+//
+//                if ((isset($this->config['json']) && $this->config['json'])) {
+//                    $promise = $this->getClient()->sendAsync(
+//                        $request,
+//                        [
+//                            'json' => $payload,
+//                            'headers' => $headers
+//                        ]
+//                    );
+//                } else {
+//                    $promise = $this->getClient()->sendAsync(
+//                        $request,
+//                        [
+//                            'query' => $params,
+//                            'headers' => $headers
+//                        ]
+//                    );
+//                }
+//            } else {
+//                throw new InvalidMethodException(
+//                    sprintf("Only GET and POST methods allowed.")
+//                );
+//            }
 
-                if ((isset($this->config['json']) && $this->config['json'])) {
-                    $promise = $this->getClient()->sendAsync(
-                        $request,
-                        [
-                            'json' => $payload,
-                            'headers' => $headers
-                        ]
-                    );
-                } else {
-                    $promise = $this->getClient()->sendAsync(
-                        $request,
-                        [
-                            'query' => $params,
-                            'headers' => $headers
-                        ]
-                    );
-                }
-            } else {
-                throw new InvalidMethodException(
-                    sprintf("Only GET and POST methods allowed.")
-                );
-            }
-
-            $response = $promise->wait();
-            $this->response = $response->getBody()->getContents();
+//            $response = $promise->wait();
+//            //
+//            $this->response = $response->getBody()->getContents();
             $this->responseCode = $response->getStatusCode();
-
+            //dd($response->getStatusCode());
+            
             Log::info('SMS Gateway Response Code: '. $this->responseCode);
             Log::info('SMS Gateway Response Body: \n'. $this->response);
-
-//            $this->response = $promise->wait()->getBody()->getContents();
-
+//            $this->res = $this->response;
+//            //print_r($this->response);
+//            $this->res = $promise->wait()->getBody()->getContents();
+//            echo"resss";
+            //print_r($this->response);
+            
         } catch (RequestException $e) {
+            Log::error($e);
+            //dd($e);
             if ($e->hasResponse()) {
+                $response = $e->getResponse();
+                $this->response = Message::bodySummary($response);
+                $this->responseCode = $response->getStatusCode();
+                //dd($response->getStatusCode());
+                Log::error('SMS Gateway Response Code: '. $this->responseCode);
+                Log::error('SMS Gateway Response Body: \n'. $this->response);
+            }
+        }
+        return $this;
+    }
+    public function get_res(){
+        return $this->res;
+    }
+    
+    public function check_palance($url =null,$method='GET')
+    {
+        try {
+            @$response = Http::get($url);
+           $body = $response->body();
+           //dd($response->json('balance'));
+           if(is_numeric($body))
+              $this->response =  $body;
+           elseif($response->json('balance')||$response->json('credits')){
+                $this->response = $response->json('balance')?$response->json('balance'):$response->json('credits');
+           }else{
+                $this->response = '0';
+           }
+           //dd($body);
+           $this->responseCode = $response->status();
+           
+        } catch (Exception $ex) {
+             if ($e->hasResponse()) {
                 $response = $e->getResponse();
                 $this->response = Message::bodySummary($response);
                 $this->responseCode = $response->getStatusCode();
@@ -203,6 +260,7 @@ class SmsApi
             }
         }
         return $this;
+       
     }
 
     /**
